@@ -32,23 +32,28 @@ UART_SERVICE_UUID = uuid.UUID('6E400001-B5A3-F393-E0A9-E50E24DCCA9E')
 TX_CHAR_UUID      = uuid.UUID('6E400002-B5A3-F393-E0A9-E50E24DCCA9E')
 RX_CHAR_UUID      = uuid.UUID('6E400003-B5A3-F393-E0A9-E50E24DCCA9E')
 
+# Define service and characteristic UUIDs.
+ARTICULATE_SERVICE_UUID = uuid.UUID('49535343-FE7D-4AE5-8FA9-9FAFD205E455')
+ARTICULATE_TX_CHAR_UUID = uuid.UUID('49535343-1E4D-4BD9-BA61-23C647249616')
+ARTICULATE_RX_CHAR_UUID = uuid.UUID('49535343-8841-43F4-A8D4-ECBE34729BB3')
+
 
 class UART(ServiceBase):
     """Bluetooth LE UART service object."""
 
     # Configure expected services and characteristics for the UART service.
-    ADVERTISED = [UART_SERVICE_UUID]
-    SERVICES = [UART_SERVICE_UUID]
-    CHARACTERISTICS = [TX_CHAR_UUID, RX_CHAR_UUID]
+    ADVERTISED = [ARTICULATE_SERVICE_UUID]
+    SERVICES = [ARTICULATE_SERVICE_UUID]
+    CHARACTERISTICS = [ARTICULATE_TX_CHAR_UUID, ARTICULATE_RX_CHAR_UUID]
 
     def __init__(self, device):
         """Initialize UART from provided bluez device."""
         # Find the UART service and characteristics associated with the device.
-        self._uart = device.find_service(UART_SERVICE_UUID)
+        self._uart = device.find_service(ARTICULATE_SERVICE_UUID)
         if self._uart is None:
             raise RuntimeError('Failed to find expected UART service!')
-        self._tx = self._uart.find_characteristic(TX_CHAR_UUID)
-        self._rx = self._uart.find_characteristic(RX_CHAR_UUID)
+        self._tx = self._uart.find_characteristic(ARTICULATE_TX_CHAR_UUID)
+        self._rx = self._uart.find_characteristic(ARTICULATE_RX_CHAR_UUID)
         if self._tx is None or self._rx is None:
             raise RuntimeError('Failed to find expected UART RX and TX characteristics!')
         # Use a queue to pass data received from the RX property change back to
@@ -61,6 +66,7 @@ class UART(ServiceBase):
         # Callback that's called when data is received on the RX characteristic.
         # Just throw the new data in the queue so the read function can access
         # it on the main thread.
+        raise RuntimeError('RX DATA RECEIVED!')
         self._queue.put(data)
 
     def write(self, data):
