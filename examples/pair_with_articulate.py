@@ -71,112 +71,35 @@ def main():
     target_device.connect()  # Will time out after 60 seconds, specify timeout_sec parameter
                              # to change the timeout
 
-    conn = None
-
     # Once connected do everything else in a try/finally to make sure the device
     # is disconnected when done.
     try:
-        get_info = False
-        ping_articulate = False
-        read_from_articulate = True
+        print('Discovering services...')
+        UART.discover(target_device)
 
-        if (get_info):
-            # Wait for service discovery to complete for the DIS service.  Will
-            # time out after 60 seconds (specify timeout_sec parameter to override).
-            print('Discovering services...')
-            DeviceInformation.discover(target_device)
+        print('Service discovery complete')
+        articulate_board = UART(target_device)
 
-            # Once service discovery is complete create an instance of the service
-            # and start interacting with it.
-            dis = DeviceInformation(target_device)
+        time.sleep(1.0)
 
-            # Print out the DIS characteristics.
-            print('Manufacturer: {0}'.format(dis.manufacturer))
-            print('Model: {0}'.format(dis.model))
-            print('Serial: {0}'.format(dis.serial))
-            print('Hardware Revision: {0}'.format(dis.hw_revision))
-            print('Software Revision: {0}'.format(dis.sw_revision))
-            print('Firmware Revision: {0}'.format(dis.fw_revision))
-            print('System ID: {0}'.format(dis.system_id))
-            print('Regulatory Cert: {0}'.format(dis.regulatory_cert))
-            print('PnP ID: {0}'.format(dis.pnp_id))
-            for i, service in enumerate(target_device.list_services()):
-                print('Device Service {0}: UUID {1}'.format(i, service.uuid))
+        print('Reading BT data')
 
-        if (ping_articulate):
-            # Wait for service discovery to complete for the UART service.  Will
-            # time out after 60 seconds (specify timeout_sec parameter to override).
-            print('Discovering services...')
-            UART.discover(target_device)
+        received = ""
 
-            print('Service discovery complete')
-            # Once service discovery is complete create an instance of the service
-            # and start interacting with it.
-            articulate_board = UART(target_device)
-
-            time.sleep(1.0)
-
-            print("Sending 'hello' to the device.")
-            # Write a string to the TX characteristic.
-            articulate_board.write('hello from Macbook!')
-            # print("Sent 'Hello world!' to the device.")
-
-            # print('Waiting up to 15 seconds to receive data from the device...')
-            received = articulate_board.read(timeout_sec=15)
+        while(received != None):
+            received = articulate_board.read(timeout_sec=10)
             if received is not None:
-                # Received data, print it out.
-                print('Received: {0}'.format(type(received)))
+                print(received)
             else:
                 # Timeout waiting for data, None is returned.
-                print('Received no data!')
-
-        if (read_from_articulate):
-
-            # Establishing socket connection
-            HOST = ''                 # Symbolic name meaning all available interfaces
-            PORT = 5204              # Arbitrary non-privileged port
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            s.bind((HOST, PORT))
-            s.listen(2)
-            conn, addr = s.accept()
-            print('Connected by', addr)
-
-            print('Discovering services...')
-            UART.discover(target_device)
-
-            print('Service discovery complete')
-            articulate_board = UART(target_device)
-
-            time.sleep(1.0)
-
-            print('Sending BT data to BSD Socket')
-
-            received = 1
-            data = ""
-
-            while(received != None):
-                received = articulate_board.read(timeout_sec=10)
-                if received is not None:
-                    # Gather BT data
-                    data = data + received
-                    # Send data in sets of 16 bytes to socket
-                    if (len(data) > 16):
-                        conn.send(data[:16])
-                        print(data[:16])
-                        data = ""
-                else:
-                    # Timeout waiting for data, None is returned.
-                    print('Received no data in 10s!')
+                print('Received no data in 10s!')
 
     except Exception, e:
         print('Failed with Exception: \'{}\''.format(e))
+
     finally:
         # Make sure device is disconnected on exit.
         target_device.disconnect()
-        if conn is not None:
-            print('Closing socket connection')
-            conn.close()
 
 # Initialize the BLE system.  MUST be called before other BLE calls!
 ble.initialize()
