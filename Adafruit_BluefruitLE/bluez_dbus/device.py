@@ -69,7 +69,9 @@ class BluezDevice(Device):
         """Connect to the device.  If not connected within the specified timeout
         then an exception is thrown.
         """
+        self._device.Disconnect()
         self._connected.clear()
+        self._disconnected.clear()
         self._device.Connect()
         if not self._connected.wait(timeout_sec):
             raise RuntimeError('Exceeded timeout waiting to connect to device!')
