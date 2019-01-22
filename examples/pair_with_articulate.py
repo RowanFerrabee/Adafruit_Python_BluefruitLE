@@ -2,6 +2,7 @@
 # Author: Tony DiCola
 import atexit
 import time
+import socket
 
 import Adafruit_BluefruitLE
 from Adafruit_BluefruitLE.services import UART
@@ -70,11 +71,14 @@ def main():
     target_device.connect()  # Will time out after 60 seconds, specify timeout_sec parameter
                              # to change the timeout
 
+    conn = None
+
     # Once connected do everything else in a try/finally to make sure the device
     # is disconnected when done.
     try:
         get_info = False
-        ping_articulate = True
+        ping_articulate = False
+        read_from_articulate = True
 
         if (get_info):
             # Wait for service discovery to complete for the DIS service.  Will
@@ -117,20 +121,62 @@ def main():
             articulate_board.write('hello from Macbook!')
             # print("Sent 'Hello world!' to the device.")
 
-            # Now wait up to one minute to receive data from the device.
             # print('Waiting up to 15 seconds to receive data from the device...')
             received = articulate_board.read(timeout_sec=15)
             if received is not None:
                 # Received data, print it out.
-                print('Received: {0}'.format(received))
+                print('Received: {0}'.format(type(received)))
             else:
                 # Timeout waiting for data, None is returned.
                 print('Received no data!')
+
+        if (read_from_articulate):
+
+            # Establishing socket connection
+            HOST = ''                 # Symbolic name meaning all available interfaces
+            PORT = 5204              # Arbitrary non-privileged port
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind((HOST, PORT))
+            s.listen(2)
+            conn, addr = s.accept()
+            print('Connected by', addr)
+
+            print('Discovering services...')
+            UART.discover(target_device)
+
+            print('Service discovery complete')
+            articulate_board = UART(target_device)
+
+            time.sleep(1.0)
+
+            print('Sending BT data to BSD Socket')
+
+            received = 1
+            data = ""
+
+            while(received != None):
+                received = articulate_board.read(timeout_sec=10)
+                if received is not None:
+                    # Gather BT data
+                    data = data + received
+                    # Send data in sets of 16 bytes to socket
+                    if (len(data) > 16):
+                        conn.send(data[:16])
+                        print(data[:16])
+                        data = ""
+                else:
+                    # Timeout waiting for data, None is returned.
+                    print('Received no data in 10s!')
+
     except Exception, e:
         print('Failed with Exception: \'{}\''.format(e))
     finally:
         # Make sure device is disconnected on exit.
         target_device.disconnect()
+        if conn is not None:
+            print('Closing socket connection')
+            conn.close()
 
 # Initialize the BLE system.  MUST be called before other BLE calls!
 ble.initialize()

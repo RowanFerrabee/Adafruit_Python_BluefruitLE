@@ -44,7 +44,7 @@ class UART(ServiceBase):
     # Configure expected services and characteristics for the UART service.
     ADVERTISED = [ARTICULATE_SERVICE_UUID]
     SERVICES = [ARTICULATE_SERVICE_UUID]
-    CHARACTERISTICS = [ARTICULATE_TX_CHAR_UUID, ARTICULATE_RX_CHAR_UUID]
+    CHARACTERISTICS = [ARTICULATE_RX_CHAR_UUID, ARTICULATE_TX_CHAR_UUID]
 
     def __init__(self, device):
         """Initialize UART from provided bluez device."""
@@ -53,7 +53,7 @@ class UART(ServiceBase):
         if self._uart is None:
             raise RuntimeError('Failed to find expected UART service!')
         self._tx = self._uart.find_characteristic(ARTICULATE_TX_CHAR_UUID)
-        self._rx = self._uart.find_characteristic(ARTICULATE_RX_CHAR_UUID)
+        self._rx = self._uart.find_characteristic(ARTICULATE_TX_CHAR_UUID)
         if self._tx is None or self._rx is None:
             raise RuntimeError('Failed to find expected UART RX and TX characteristics!')
         # Use a queue to pass data received from the RX property change back to
@@ -66,7 +66,6 @@ class UART(ServiceBase):
         # Callback that's called when data is received on the RX characteristic.
         # Just throw the new data in the queue so the read function can access
         # it on the main thread.
-        raise RuntimeError('RX DATA RECEIVED!')
         self._queue.put(data)
 
     def write(self, data):
