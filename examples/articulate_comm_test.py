@@ -15,6 +15,7 @@ ble = Adafruit_BluefruitLE.get_provider()
 import random
 import string
 
+
 # Main function implements the program logic so it can run in a background
 # thread.  Most platforms require the main thread to handle GUI events and other
 # asyncronous events like BLE actions.  All of the threading logic is taken care
@@ -77,71 +78,73 @@ def main():
 
     # Once connected do everything else in a try/finally to make sure the device
     # is disconnected when done.
-    try:
-        print('Discovering services...')
-        UART.discover(target_device)
+    # try:
+    print('Discovering services...')
+    UART.discover(target_device)
 
-        print('Service discovery complete')
-        articulate_board = UART(target_device)
+    print('Service discovery complete')
+    articulate_board = UART(target_device)
 
-        time.sleep(1.0)
+    time.sleep(1.0)
 
-        print('Starting a comm test...')
+    print('Starting a comm test...')
 
-        # comm test parameters
+    # comm test parameters
 
-        NUM_TRIALS = 50
-        HEADER_VAL = 253
-        PACKET_SIZE = 40
-        OVERHEAD = 2
-        DATA_SIZE = PACKET_SIZE - OVERHEAD
-        
-        tripTimes = []
+    NUM_TRIALS = 50
+    HEADER_VAL = chr(253)
+    PACKET_SIZE = 40
+    OVERHEAD = 2
+    DATA_SIZE = PACKET_SIZE - OVERHEAD
+    MAX_NUM_ERRORS = 10
+    
+    tripTimes = []
 
-        for i in range(0,NUM_TRIALS):
+    for i in range(0,NUM_TRIALS):
+        print('Trial', i)
 
-            # generate random string
-            randomString = ''.join([random.choice(string.ascii_letters + string.digits) for n in xrange(DATA_SIZE)])
-            reversedString = randomString[::-1]
+        # generate random string
+        randomString = ''.join([random.choice(string.ascii_letters + string.digits) for n in xrange(DATA_SIZE)])
+        reversedString = randomString[::-1]
 
-            # get sum of character values
-            checksum = sum([ord(x) for x in randomString]) % 255 
+        # get sum of character values
+        checksum = chr(sum([ord(x) for x in randomString]) % 256)
 
-            # start timer
-            startTime = time.perf_counter()
+        # start timer
+        startTime = time.time()
 
-            # send bytes
-            articulate_board.write(HEADER_VAL)
-            articulate_board.write(randomString)
-            articulate_board.write(checksum)
+        # send bytes
+        articulate_board.write(HEADER_VAL)
+        articulate_board.write(randomString)
+        articulate_board.write(checksum)
 
-            # wait for reception
-            while(received == None or len(received) < PACKET_SIZE):
-                received = received + articulate_board.read(timeout_sec=1)
+        # wait for reception
+        msg = []
+        error = 0
+        while(len(msg) < PACKET_SIZE and error < MAX_NUM_ERRORS):
+            received = articulate_board.read(timeout_sec=1)
+            if received is not None:
+                msg.append(received)
+                print('Success')
+            else:
+                error=error+1
+                print('Error')
 
-            # stop timer
-            endTime = time.perf_counter()
+        # stop timer
+        endTime = time.time()
 
-            roundTripTime = endTime - startTime
-            tripTimes.append(roundTripTime)
+        roundTripTime = endTime - startTime
+        tripTimes.append(roundTripTime)
 
         averageTime = sum(tripTimes) / len(tripTimes)
         print("Average round trip time was: ", averageTime)
 
-        while(received != None):
-            received = articulate_board.read(timeout_sec=10)
-            if received is not None:
-                print(received)
-            else:
-                # Timeout waiting for data, None is returned.
-                print('Received no data in 10s!')
+    # except Exception, e:
+    #     print('Failed with Exception: \'{}\''.format(e))
 
-    except Exception, e:
-        print('Failed with Exception: \'{}\''.format(e))
-
-    finally:
+    # finally:
         # Make sure device is disconnected on exit.
-        target_device.disconnect()
+    target_device.disconnect()
 
 # Initialize the BLE system.  MUST be called before other BLE calls!
 ble.initialize()
