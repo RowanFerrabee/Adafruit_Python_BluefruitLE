@@ -99,6 +99,8 @@ def main():
     MAX_NUM_ERRORS = 10
     
     tripTimes = []
+    successes = 0
+    failures = 0
 
     for i in range(0,NUM_TRIALS):
         print('Trial', i)
@@ -119,25 +121,44 @@ def main():
         articulate_board.write(checksum)
 
         # wait for reception
-        msg = []
+        msg = ''
         error = 0
-        while(len(msg) < PACKET_SIZE and error < MAX_NUM_ERRORS):
+        while((len(msg) < PACKET_SIZE) and (error < MAX_NUM_ERRORS)):
             received = articulate_board.read(timeout_sec=1)
             if received is not None:
-                msg.append(received)
-                print('Success')
+                msg = msg + (received)
             else:
                 error=error+1
-                print('Error')
 
         # stop timer
         endTime = time.time()
-
         roundTripTime = endTime - startTime
-        tripTimes.append(roundTripTime)
 
-        averageTime = sum(tripTimes) / len(tripTimes)
-        print("Average round trip time was: ", averageTime)
+        expectedResponse = (HEADER_VAL + randomString + checksum)
+        success = len(msg) == PACKET_SIZE and msg == expectedResponse
+
+        successes = successes + (1 if success else 0)
+        failures = failures + (0 if success else 1)
+
+        if(success):
+            tripTimes.append(roundTripTime)
+            print("Exact success")
+        elif(len(msg) == PACKET_SIZE):
+            print("Received a full packet, but it was invalid.")
+            print("Expected: " + expectedResponse)
+            print("Received: " + msg)
+        elif(msg == ''):
+            print("Error: received nothing in " + str(roundTripTime) + " seconds. Checksum was: " + str(ord(checksum)))
+        else:
+            print("Error: didn't receive full packet in time")
+
+        if(len(tripTimes) > 0):   
+           averageTime = sum(tripTimes) / len(tripTimes)
+        else:
+            averageTime = -1
+
+        print("Average round trip time was: " + str(averageTime) + " seconds")
+        print("Success rate: " + str(successes) + "/" + str(successes+failures))
 
     # except Exception, e:
     #     print('Failed with Exception: \'{}\''.format(e))
