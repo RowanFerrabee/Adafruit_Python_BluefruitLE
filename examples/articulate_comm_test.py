@@ -91,7 +91,7 @@ def main():
 
     # comm test parameters
 
-    NUM_TRIALS = 50
+    NUM_TRIALS = 20
     HEADER_VAL = chr(253)
     PACKET_SIZE = 40
     OVERHEAD = 2
@@ -106,7 +106,13 @@ def main():
         print('Trial', i)
 
         # generate random string
-        randomString = ''.join([random.choice(string.ascii_letters + string.digits) for n in xrange(DATA_SIZE)])
+        # randomString = ''.join([random.choice(string.ascii_letters + string.digits) for n in xrange(DATA_SIZE)])
+
+        randomString = chr(i+ord('0'))*30+'AAAAAAAA'
+
+        #randomString = ''.join([str(x)+'_' for x in range(i*20, i*20+40)])
+        #randomString = randomString[:PACKET_SIZE-2]
+
         reversedString = randomString[::-1]
 
         # get sum of character values
@@ -134,7 +140,7 @@ def main():
         endTime = time.time()
         roundTripTime = endTime - startTime
 
-        expectedResponse = (HEADER_VAL + randomString + checksum)
+        expectedResponse = (HEADER_VAL + reversedString + checksum)
         success = len(msg) == PACKET_SIZE and msg == expectedResponse
 
         successes = successes + (1 if success else 0)
@@ -145,8 +151,8 @@ def main():
             print("Exact success")
         elif(len(msg) == PACKET_SIZE):
             print("Received a full packet, but it was invalid.")
-            print("Expected: " + expectedResponse)
-            print("Received: " + msg)
+            print("Expected: " + (expectedResponse.decode('cp437')))
+            print("Received: " + (msg.decode('cp437')))
         elif(msg == ''):
             print("Error: received nothing in " + str(roundTripTime) + " seconds. Checksum was: " + str(ord(checksum)))
         else:
