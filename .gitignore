@@ -58,3 +58,4 @@ docs/_build/
 target/
 .mypy_cache/
 .ropeproject/
+.DS_Store
