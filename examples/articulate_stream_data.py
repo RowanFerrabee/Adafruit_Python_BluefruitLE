@@ -3,6 +3,7 @@
 import atexit
 import time
 import socket
+import math
 
 import Adafruit_BluefruitLE
 from Adafruit_BluefruitLE.services import UART
@@ -22,6 +23,10 @@ from msg_defs import *
 # of automatically though and you just need to provide a main function that uses
 # the BLE provider.
 
+LRA_WORKER_PERIOD = 0.1
+MIN_REC_MOVEMENT = 5
+VIBRATE_THRESHOLD_DIST = 0.35 # Aprrox 20 deg in rad
+
 STARTING_STREAM = 0
 STREAMING = 1
 state = STARTING_STREAM
@@ -29,12 +34,31 @@ state = STARTING_STREAM
 fsmState = 0
 fsmCounter = 0
 
+exercising = False
+recording = False
+recordedMovement = []
+
 imuDataAvailable = 0
-latestImuData = ''
+latestImuData = None
+
+def quaternionToGravity(quat):
+    w = quat[0]
+    x = quat[1]
+    y = quat[2]
+    z = quat[3]
+    
+    gx = 2 * (x*z - w*y);
+    gy = 2 * (w*x + y*z);
+    gz = w*w - x*x - y*y + z*z;
+
+    return [gx, gy, gz]
 
 def imuServerWorker():
     global imuDataAvailable
     global latestImuData
+    global exercising
+    global recording
+    global recordedMovement
 
     time.sleep(1)
     HOST = ''               # Symbolic name meaning all available interfaces
@@ -44,14 +68,62 @@ def imuServerWorker():
     s.bind((HOST, PORT))
     s.listen(2)
     conn, addr = s.accept()
+    conn.setblocking(0)
     print('IMU server connected on: {}'.format(addr))
 
     try:
-        while(True):
+        connectionFailed = False
+        sendCounter = 0
+
+        while (not(connectionFailed)):
             if (imuDataAvailable):
+                # latestImuQuat = IMUDataMsg.fromBytes(latestImuData)
+                # gravity = quaternionToGravity(latestImuQuat.quat)
+                # print('Gravity: {}'.format(gravity))
                 conn.send(latestImuData)
                 imuDataAvailable = False
-                print('Sent IMU Data')
+
+                sendCounter += 1
+                if sendCounter >= 25:
+                    print('Sent {} IMU Packets'.format(sendCounter))
+                    sendCounter = 0
+
+            # Check if any commands are being sent
+            try:
+                cmd = conn.recv(PACKET_SIZE)
+
+                if (ord(cmd[POS_SOP]) == SOP and ord(cmd[POS_DATA]) == GUI_CONTROL_MSG):
+
+                    if (cmd[POS_DATA+1] == chr(START_RECORDING)):
+                        if not(recording):
+                            recording = True
+                            recordedMovement = []
+                            print("Starting Recording!")
+
+                    elif (cmd[POS_DATA+1] == chr(STOP_RECORDING)):
+                        if (recording):
+                            recording = False
+                            print("Ending Recording!")
+                            print("Recording size: {}".format(len(recordedMovement)))
+
+                    elif (cmd[POS_DATA+1] == chr(START_EXERCISE)):
+                        if not(exercising):
+                            exercising = True
+                            print("Starting Exercise!")
+
+                    elif (cmd[POS_DATA+1] == chr(STOP_EXERCISE)):
+                        if (exercising):
+                            exercising = False
+                            print("Ending Exercise!")
+
+                    elif (cmd[POS_DATA+1] == chr(PRINT_RECORDING)):
+                        print(recordedMovement)
+
+                    else:
+                        print("Received invalid command: {}".format(cmd))
+                        connectionFailed = True
+            except Exception:
+                pass
     finally:
         if conn is not None:
             print('Closing socket connection')
@@ -64,8 +136,11 @@ def bluetoothWorker(articulate_board):
 
     global imuDataAvailable
     global latestImuData
+    global recording
+    global recordedMovement
 
     MAX_NUM_ERRORS = 4
+    recvCounter = 0
 
     while(True):
 
@@ -80,6 +155,8 @@ def bluetoothWorker(articulate_board):
                 time.sleep(0.01)
                 num_errors += 1
 
+        msg = msg[:PACKET_SIZE]
+
         if (len(msg) < PACKET_SIZE):
             print("Failed to read packet. Num errors: {}".format(num_errors))
             continue
@@ -88,29 +165,42 @@ def bluetoothWorker(articulate_board):
             print("Incorrect SOP")
             continue
 
+        # if ((sum([ord(x) for x in msg]) % 256) != msg[POS_CHECKSUM]):
+        #     print("Incorrect CHECKSUM")
+        #     continue
+
         parsed_message = None
         if (msg[POS_DATA] == chr(IMU_DATA_MSG)):
             parsed_message = IMUDataMsg.fromBytes(msg)
+            if (recording):
+                recordedMovement.append(parsed_message)
+
             if (imuDataAvailable == False):
-                latestImuData = msg[2:18]
+                latestImuData = msg
                 imuDataAvailable = True
+
+            recvCounter += 1
 
         elif (msg[POS_DATA] == chr(ACK_MSG)):
             parsed_message = ACKMsg.fromBytes(msg)
+            recvCounter += 1
 
         elif (msg[POS_DATA] == chr(STANDBY_MSG)):
             parsed_message = StandbyMsg.fromBytes(msg)
+            recvCounter += 1
 
         else:
             print("Invalid Data Type")
             continue
 
-        print("Received: {}".format(parsed_message))
+        if recvCounter >= 25:
+            print("Received {} messages".format(recvCounter))
+            recvCounter = 0
 
 
 def keepAliveWorker(articulate_board):
     # Send periodic messages to continue streaming 
-    test_standby = True
+    test_standby = False
 
     i = 0
     while(True):
@@ -124,7 +214,7 @@ def keepAliveWorker(articulate_board):
                 articulate_board.write(msg.toBytes())
 
         else:
-            print("Sending stream message")
+            # print("Sending stream message")
             msg = StreamMsg(50)    # Set IMU streaming period (in ms)
             articulate_board.write(msg.toBytes())
 
@@ -132,6 +222,8 @@ def keepAliveWorker(articulate_board):
         i=i+1
 
 def lraCmdWorker(articulate_board):
+
+    lrasAreOn = False
 
     onIntensities = [int(127)]*8
     onMsgBytes = LRACmdMsg(onIntensities).toBytes()
@@ -141,20 +233,49 @@ def lraCmdWorker(articulate_board):
 
     i = 0
     while(True):
-        if (i%2 == 0):
-            print("Sending LRA on message")
-            articulate_board.write(onMsgBytes)
-            time.sleep(1)
+        if (exercising and not(recording) and latestImuData != None
+            and len(recordedMovement) >= MIN_REC_MOVEMENT):
+
+            q1 = (IMUDataMsg.fromBytes(latestImuData)).quat
+
+            minDist = VIBRATE_THRESHOLD_DIST + 1
+            for movementPoint in recordedMovement:
+                q2 = movementPoint.quat
+                dotProduct = q1[0]*q2[0] + q1[1]*q2[1] + q1[2]*q2[2] + q1[3]*q2[3]
+
+                # Sometimes dotProduct is very slightly over 1
+                if (dotProduct > 1 and dotProduct < 1.001):
+                    dotProduct = 1
+
+                pointDist = 2*math.acos(dotProduct)
+                if (pointDist < minDist):
+                    minDist = pointDist
+
+            if (minDist >= VIBRATE_THRESHOLD_DIST):
+                if not(lrasAreOn):
+                    print("Turning LRAs on")
+                    articulate_board.write(onMsgBytes)
+                    lrasAreOn = True
+            else:
+                if (lrasAreOn):
+                    print("Turning LRAs off")
+                    articulate_board.write(offMsgBytes)
+                    lrasAreOn = False
+
         else:
-            print("Sending LRA off message")
-            articulate_board.write(offMsgBytes)
-            time.sleep(3)
+            if (lrasAreOn):
+                print("Turning LRAs off")
+                articulate_board.write(offMsgBytes)
+                lrasAreOn = False
+
+        time.sleep(LRA_WORKER_PERIOD)
 
         i += 1
 
 def main():
 
     target_device_name = u'RN4871-1444'
+    # target_device_name = u'RN4678-09E5'
     target_device = None
 
     # Clear any cached data because both bluez and CoreBluetooth have issues with

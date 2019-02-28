@@ -17,7 +17,8 @@ STANDBY_MSG = 2
 STATE_CHANGE_MSG = 3
 IMU_DATA_MSG = 4
 LRA_CONTROL_MSG = 5
-NUM_MSG_TYPES = 6
+GUI_CONTROL_MSG = 6
+NUM_MSG_TYPES = 7
 
 # streaming states
 
@@ -25,6 +26,12 @@ DEFAULT_STATE = 0
 IMU_STREAMING_STATE = 1
 INVALID_STATE = 2
 NUM_BOARD_STATES = 3
+
+START_RECORDING = 0
+STOP_RECORDING = 1
+START_EXERCISE = 2
+STOP_EXERCISE = 3
+PRINT_RECORDING = 4
 
 import struct
 import binascii
@@ -66,7 +73,6 @@ class StreamMsg:
         isOk = bytes[5:7] == AOK
 
         return StreamMsg(period, isOk)
-
 
 class LRACmdMsg:
     def __init__(self, intensities):
