@@ -25,7 +25,7 @@ def quatDist(q1, q2):
 
     return 2*math.acos(dotProduct)
 
-def quaternionToGravity(quat):
+def quatToGravity(quat):
     w = quat[0]
     x = quat[1]
     y = quat[2]

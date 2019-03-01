@@ -24,7 +24,7 @@ from quaternion import *
 # of automatically though and you just need to provide a main function that uses
 # the BLE provider.
 
-LRA_WORKER_PERIOD = 0.5
+LRA_WORKER_PERIOD = 0.3
 MIN_REC_MOVEMENT = 5
 VIBRATE_THRESHOLD_DIST = 0.35 # Aprrox 20 deg in rad
 
@@ -177,6 +177,7 @@ def bluetoothWorker(articulate_board):
                 recordedMovement.append(parsed_message)
 
             if (tcpConnection is not None):
+                # Only send over 1 in 2 so Processing doesn't get overwhelmed
                 if (sendCounter % 2 == 0):
                     tcpConnection.send(msg)
     
@@ -241,19 +242,24 @@ def lraCmdWorker(articulate_board):
             and len(recordedMovement) >= MIN_REC_MOVEMENT):
 
             minDist = VIBRATE_THRESHOLD_DIST + 1
+            imuGrav = quatToGravity(latestImuData.quat)
+            magImuGrav = math.sqrt(sum([elem*elem for elem in imuGrav]))
 
             for movementPoint in recordedMovement:
 
-                dist = quatDist(latestImuData.quat, movementPoint.quat)
+                mvGrav = quatToGravity(movementPoint.quat)
+                magMvGrav = math.sqrt(sum([elem*elem for elem in mvGrav]))
+
+                normDot = (imuGrav[0]*mvGrav[0] + imuGrav[1]*mvGrav[1] + imuGrav[2]*mvGrav[2]) / (magMvGrav * magImuGrav)
+                dist = math.acos(normDot)
+
 
                 if (dist < minDist):
                     minDist = dist
                     if (dist > 0.1):
-                        rot = quatProduct(latestImuData.quat, quatConj(movementPoint.quat))
-
-                        intensities = [ max(0, rot[1]), 0, max(0,-rot[2]), 0,
-                                        max(0,-rot[1]), 0, max(0, rot[2]), 0 ]
-                        intensities = [int(min(127, 500*elem)) for elem in intensities]
+                        intensities = [ max(0, mvGrav[2] - imuGrav[2]), 0, max(0, mvGrav[1] - imuGrav[1]), 0,
+                                        max(0, imuGrav[2] - mvGrav[2]), 0, max(0, imuGrav[1] - mvGrav[1]), 0 ]
+                        intensities = [int(min(127, 600*elem)) for elem in intensities]
 
                         newLraMsg = LRACmdMsg(intensities).toBytes()
 
@@ -266,7 +272,6 @@ def lraCmdWorker(articulate_board):
                 tcpConnection.send(newLraMsg)
                 tcpConnection.send(newLraMsg) # Twice for good measure
             lastLraMsg = newLraMsg
-
 
         time.sleep(LRA_WORKER_PERIOD)
 
@@ -339,11 +344,11 @@ def main():
     time.sleep(1.0)
 
     try:
-        print("Starting bt thread")
+        print("Starting BT thread")
         btThread = threading.Thread(target=bluetoothWorker, args=(articulate_board,))
         btThread.start()
 
-        print('Starting keep alive thread')
+        print('Starting Keep Alive thread')
         keepAliveThread = threading.Thread(target=keepAliveWorker, args=(articulate_board,))
         keepAliveThread.start()
 
