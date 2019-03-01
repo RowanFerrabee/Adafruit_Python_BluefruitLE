@@ -26,7 +26,7 @@ from quaternion import *
 
 LRA_WORKER_PERIOD = 0.3
 MIN_REC_MOVEMENT = 5
-VIBRATE_THRESHOLD_DIST = 0.35 # Aprrox 20 deg in rad
+VIBRATE_THRESHOLD_DIST = 0.087 # 5 deg in rad
 
 STARTING_STREAM = 0
 STREAMING = 1
@@ -250,21 +250,40 @@ def lraCmdWorker(articulate_board):
                 mvGrav = quatToGravity(movementPoint.quat)
                 magMvGrav = math.sqrt(sum([elem*elem for elem in mvGrav]))
 
-                normDot = (imuGrav[0]*mvGrav[0] + imuGrav[1]*mvGrav[1] + imuGrav[2]*mvGrav[2]) / (magMvGrav * magImuGrav)
-                dist = math.acos(normDot)
+                if (magMvGrav != 0 and magImuGrav != 0):
+                    normDot = (imuGrav[0]*mvGrav[0] + imuGrav[1]*mvGrav[1] + imuGrav[2]*mvGrav[2]) / (magMvGrav * magImuGrav)
+                    dist = math.acos(normDot)
+                else:
+                    dist = 0
 
-
-                if (dist < minDist):
+                if (dist >= VIBRATE_THRESHOLD_DIST and dist < minDist):
                     minDist = dist
-                    if (dist > 0.1):
-                        intensities = [ max(0, mvGrav[2] - imuGrav[2]), 0, max(0, mvGrav[1] - imuGrav[1]), 0,
-                                        max(0, imuGrav[2] - mvGrav[2]), 0, max(0, imuGrav[1] - mvGrav[1]), 0 ]
-                        intensities = [int(min(127, 600*elem)) for elem in intensities]
+                    z_dist = mvGrav[2] - imuGrav[2]
+                    y_dist = mvGrav[1] - imuGrav[1]
 
-                        newLraMsg = LRACmdMsg(intensities).toBytes()
+                    mag = math.sqrt(y_dist**2 + z_dist**2)
+                    angle = math.atan2(y_dist, z_dist)
+                    if (angle < 0):
+                        angle += 2*math.pi
 
-            if (minDist >= VIBRATE_THRESHOLD_DIST):
-                newLraMsg = onMsgBytes
+                    idx1 = 0
+                    while ((idx1+1) * math.pi/4 < angle):
+                        idx1 += 1
+
+                    idx2 = (idx1 + 1) % 8
+                    portion2 = (angle - idx1 * math.pi/4) / (math.pi / 4)
+                    portion1 = 1 - portion2
+
+                    if (portion1 > 1 or portion1 < 0):
+                        print("portioning error")
+                        print("Angle {} idx1 {} portion1 {}".format(angle, idx1, portion1))
+
+                    intensities = [0] * 8
+                    intensities[idx1] = mag * portion1
+                    intensities[idx2] = mag * portion2
+                    intensities = [int(min(127, 600*elem)) for elem in intensities]
+
+                    newLraMsg = LRACmdMsg(intensities).toBytes()
 
         if (newLraMsg != lastLraMsg):
             articulate_board.write(newLraMsg)
@@ -273,7 +292,7 @@ def lraCmdWorker(articulate_board):
                 tcpConnection.send(newLraMsg) # Twice for good measure
             lastLraMsg = newLraMsg
 
-        time.sleep(LRA_WORKER_PERIOD)
+            time.sleep(LRA_WORKER_PERIOD)
 
 
 def main():
