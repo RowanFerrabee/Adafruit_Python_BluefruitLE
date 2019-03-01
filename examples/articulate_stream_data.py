@@ -16,6 +16,7 @@ import random
 import string
 import threading
 from msg_defs import *
+from quaternion import *
 
 # Main function implements the program logic so it can run in a background
 # thread.  Most platforms require the main thread to handle GUI events and other
@@ -23,7 +24,7 @@ from msg_defs import *
 # of automatically though and you just need to provide a main function that uses
 # the BLE provider.
 
-LRA_WORKER_PERIOD = 0.1
+LRA_WORKER_PERIOD = 0.5
 MIN_REC_MOVEMENT = 5
 VIBRATE_THRESHOLD_DIST = 0.35 # Aprrox 20 deg in rad
 
@@ -33,6 +34,8 @@ state = STARTING_STREAM
 
 fsmState = 0
 fsmCounter = 0
+
+tcpConnection = None
 
 exercising = False
 recording = False
@@ -53,12 +56,13 @@ def quaternionToGravity(quat):
 
     return [gx, gy, gz]
 
-def imuServerWorker():
-    global imuDataAvailable
-    global latestImuData
+def tcpServerWorker():
+    global tcpConnection
     global exercising
     global recording
     global recordedMovement
+
+    tcpConnection = None
 
     time.sleep(1)
     HOST = ''               # Symbolic name meaning all available interfaces
@@ -67,30 +71,19 @@ def imuServerWorker():
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     s.bind((HOST, PORT))
     s.listen(2)
-    conn, addr = s.accept()
-    conn.setblocking(0)
-    print('IMU server connected on: {}'.format(addr))
+    tcpConnection, addr = s.accept()
+    tcpConnection.setblocking(1)
+    print('TCP server connected on: {}'.format(addr))
 
     try:
         connectionFailed = False
         sendCounter = 0
 
         while (not(connectionFailed)):
-            if (imuDataAvailable):
-                # latestImuQuat = IMUDataMsg.fromBytes(latestImuData)
-                # gravity = quaternionToGravity(latestImuQuat.quat)
-                # print('Gravity: {}'.format(gravity))
-                conn.send(latestImuData)
-                imuDataAvailable = False
-
-                sendCounter += 1
-                if sendCounter >= 25:
-                    print('Sent {} IMU Packets'.format(sendCounter))
-                    sendCounter = 0
-
+            tcpConnection.send('')
             # Check if any commands are being sent
             try:
-                cmd = conn.recv(PACKET_SIZE)
+                cmd = tcpConnection.recv(PACKET_SIZE)
 
                 if (ord(cmd[POS_SOP]) == SOP and ord(cmd[POS_DATA]) == GUI_CONTROL_MSG):
 
@@ -125,22 +118,26 @@ def imuServerWorker():
             except Exception:
                 pass
     finally:
-        if conn is not None:
+        if tcpConnection is not None:
             print('Closing socket connection')
-            conn.close()
+            tcpConnection.close()
         else:
             print('No socket connection')
+
+        tcpConnection = None
 
 
 def bluetoothWorker(articulate_board):
 
-    global imuDataAvailable
+    global tcpConnection
     global latestImuData
     global recording
     global recordedMovement
 
     MAX_NUM_ERRORS = 4
+
     recvCounter = 0
+    sendCounter = 0
 
     while(True):
 
@@ -152,7 +149,6 @@ def bluetoothWorker(articulate_board):
             if received is not None:
                 msg = msg + (received)
             else:
-                time.sleep(0.01)
                 num_errors += 1
 
         msg = msg[:PACKET_SIZE]
@@ -170,18 +166,8 @@ def bluetoothWorker(articulate_board):
         #     continue
 
         parsed_message = None
-        if (msg[POS_DATA] == chr(IMU_DATA_MSG)):
-            parsed_message = IMUDataMsg.fromBytes(msg)
-            if (recording):
-                recordedMovement.append(parsed_message)
 
-            if (imuDataAvailable == False):
-                latestImuData = msg
-                imuDataAvailable = True
-
-            recvCounter += 1
-
-        elif (msg[POS_DATA] == chr(ACK_MSG)):
+        if (msg[POS_DATA] == chr(ACK_MSG)):
             parsed_message = ACKMsg.fromBytes(msg)
             recvCounter += 1
 
@@ -189,11 +175,29 @@ def bluetoothWorker(articulate_board):
             parsed_message = StandbyMsg.fromBytes(msg)
             recvCounter += 1
 
+        elif (msg[POS_DATA] == chr(IMU_DATA_MSG)):
+            parsed_message = IMUDataMsg.fromBytes(msg)
+
+            if (recording):
+                recordedMovement.append(parsed_message)
+
+            if (tcpConnection is not None):
+                if (sendCounter % 2 == 0):
+                    tcpConnection.send(msg)
+    
+                latestImuData = parsed_message
+                sendCounter += 1
+                if sendCounter >= 50:
+                    print('Sent {} IMU Packets'.format(sendCounter))
+                    sendCounter = 0
+
+            recvCounter += 1
+
         else:
             print("Invalid Data Type")
             continue
 
-        if recvCounter >= 25:
+        if recvCounter >= 50:
             print("Received {} messages".format(recvCounter))
             recvCounter = 0
 
@@ -223,7 +227,8 @@ def keepAliveWorker(articulate_board):
 
 def lraCmdWorker(articulate_board):
 
-    lrasAreOn = False
+    global tcpConnection
+    global latestImuData
 
     onIntensities = [int(127)]*8
     onMsgBytes = LRACmdMsg(onIntensities).toBytes()
@@ -231,46 +236,45 @@ def lraCmdWorker(articulate_board):
     offIntensities = [int(0)]*8
     offMsgBytes = LRACmdMsg(offIntensities).toBytes()
 
-    i = 0
+    lastLraMsg = offMsgBytes
+
     while(True):
+
+        newLraMsg = offMsgBytes
+
         if (exercising and not(recording) and latestImuData != None
             and len(recordedMovement) >= MIN_REC_MOVEMENT):
 
-            q1 = (IMUDataMsg.fromBytes(latestImuData)).quat
-
             minDist = VIBRATE_THRESHOLD_DIST + 1
+
             for movementPoint in recordedMovement:
-                q2 = movementPoint.quat
-                dotProduct = q1[0]*q2[0] + q1[1]*q2[1] + q1[2]*q2[2] + q1[3]*q2[3]
 
-                # Sometimes dotProduct is very slightly over 1
-                if (dotProduct > 1 and dotProduct < 1.001):
-                    dotProduct = 1
+                dist = quatDist(latestImuData.quat, movementPoint.quat)
 
-                pointDist = 2*math.acos(dotProduct)
-                if (pointDist < minDist):
-                    minDist = pointDist
+                if (dist < minDist):
+                    minDist = dist
+                    if (dist > 0.1):
+                        rot = quatProduct(latestImuData.quat, quatConj(movementPoint.quat))
+
+                        intensities = [ max(0, rot[1]), 0, max(0,-rot[2]), 0,
+                                        max(0,-rot[1]), 0, max(0, rot[2]), 0 ]
+                        intensities = [int(min(127, 500*elem)) for elem in intensities]
+
+                        newLraMsg = LRACmdMsg(intensities).toBytes()
 
             if (minDist >= VIBRATE_THRESHOLD_DIST):
-                if not(lrasAreOn):
-                    print("Turning LRAs on")
-                    articulate_board.write(onMsgBytes)
-                    lrasAreOn = True
-            else:
-                if (lrasAreOn):
-                    print("Turning LRAs off")
-                    articulate_board.write(offMsgBytes)
-                    lrasAreOn = False
+                newLraMsg = onMsgBytes
 
-        else:
-            if (lrasAreOn):
-                print("Turning LRAs off")
-                articulate_board.write(offMsgBytes)
-                lrasAreOn = False
+        if (newLraMsg != lastLraMsg):
+            articulate_board.write(newLraMsg)
+            if (tcpConnection is not None):
+                tcpConnection.send(newLraMsg)
+                tcpConnection.send(newLraMsg) # Twice for good measure
+            lastLraMsg = newLraMsg
+
 
         time.sleep(LRA_WORKER_PERIOD)
 
-        i += 1
 
 def main():
 
@@ -353,10 +357,10 @@ def main():
         lraCmdThread.start()
 
         while(True):
-            print("Starting IMU server thread")
-            imuServerThread = threading.Thread(target=imuServerWorker, args=())
-            imuServerThread.start()
-            imuServerThread.join()
+            print("Starting TCP server thread")
+            tcpServerThread = threading.Thread(target=tcpServerWorker, args=())
+            tcpServerThread.start()
+            tcpServerThread.join()
 
     finally:
         target_device.disconnect()
