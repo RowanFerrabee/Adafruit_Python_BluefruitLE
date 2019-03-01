@@ -44,18 +44,6 @@ recordedMovement = []
 imuDataAvailable = 0
 latestImuData = None
 
-def quaternionToGravity(quat):
-    w = quat[0]
-    x = quat[1]
-    y = quat[2]
-    z = quat[3]
-    
-    gx = 2 * (x*z - w*y);
-    gy = 2 * (w*x + y*z);
-    gz = w*w - x*x - y*y + z*z;
-
-    return [gx, gy, gz]
-
 def tcpServerWorker():
     global tcpConnection
     global exercising
@@ -80,7 +68,10 @@ def tcpServerWorker():
         sendCounter = 0
 
         while (not(connectionFailed)):
+            # Send an empty string - does nothing unless connection is broken, in which case
+            # it throws an exception and the connection is set to None
             tcpConnection.send('')
+
             # Check if any commands are being sent
             try:
                 cmd = tcpConnection.recv(PACKET_SIZE)
@@ -148,6 +139,11 @@ def bluetoothWorker(articulate_board):
             received = articulate_board.read(timeout_sec=1)
             if received is not None:
                 msg = msg + (received)
+                idxSOP = msg.find(chr(SOP))
+                if (idxSOP == -1):
+                    msg = ''
+                elif (idxSOP != 0):
+                    msg = msg[idxSOP:]
             else:
                 num_errors += 1
 
@@ -161,6 +157,7 @@ def bluetoothWorker(articulate_board):
             print("Incorrect SOP")
             continue
 
+        # # Return to checking checksums when board bug is fixed
         # if ((sum([ord(x) for x in msg]) % 256) != msg[POS_CHECKSUM]):
         #     print("Incorrect CHECKSUM")
         #     continue
@@ -169,11 +166,9 @@ def bluetoothWorker(articulate_board):
 
         if (msg[POS_DATA] == chr(ACK_MSG)):
             parsed_message = ACKMsg.fromBytes(msg)
-            recvCounter += 1
 
         elif (msg[POS_DATA] == chr(STANDBY_MSG)):
             parsed_message = StandbyMsg.fromBytes(msg)
-            recvCounter += 1
 
         elif (msg[POS_DATA] == chr(IMU_DATA_MSG)):
             parsed_message = IMUDataMsg.fromBytes(msg)
@@ -191,11 +186,11 @@ def bluetoothWorker(articulate_board):
                     print('Sent {} IMU Packets'.format(sendCounter))
                     sendCounter = 0
 
-            recvCounter += 1
-
         else:
             print("Invalid Data Type")
             continue
+
+        recvCounter += 1
 
         if recvCounter >= 50:
             print("Received {} messages".format(recvCounter))

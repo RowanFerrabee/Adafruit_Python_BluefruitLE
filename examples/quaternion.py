@@ -24,3 +24,15 @@ def quatDist(q1, q2):
     dotProduct = min(dotProduct, 1)
 
     return 2*math.acos(dotProduct)
+
+def quaternionToGravity(quat):
+    w = quat[0]
+    x = quat[1]
+    y = quat[2]
+    z = quat[3]
+    
+    gx = 2 * (x*z - w*y);
+    gy = 2 * (w*x + y*z);
+    gz = w*w - x*x - y*y + z*z;
+
+    return [gx, gy, gz]
